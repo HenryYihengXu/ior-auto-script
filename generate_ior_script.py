@@ -6,350 +6,1082 @@ import math
 
 numIteration = 5
 
+def generateLassenGpfsExtremePoints(baseDir='/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints'):
+    numJob = 0
+    df = pd.read_csv(baseDir + '/extreme-points.csv')
+    for iteration in range(5):
+        for index, row in df.iterrows():
+            system = 'lassen-gpfs'
+            numBB = 0
+            point = row['point']
+            api = row['api(-a)']
+            blockSize = row['blockSize(-b)']
+            collective = row['collective(-c)']
+            fsync = row['fsync(-e)']
+            useExistingTestFile = row['useExistingTestFile(-E)']
+            filePerProc = row['filePerProc(-F)']
+            intraTestBarriers = row['intraTestBarriers(-g)']
+            setAlignment = row['setAlignment(-J)']
+            keepFile = row['keepFile(-k)']
+            memoryPerNode = row['memoryPerNode(-M)']
+            noFill = row['noFill(-n)']
+            preallocate = row['preallocate(-p)']
+            readFile = row['readFile(-r)']
+            segment = row['segment(-s)']
+            transferSize = row['transferSize(-t)']
+            uniqueDir = row['uniqueDir(-u)']
+            useFileView = row['useFileView(-V)']
+            writeFile = row['writeFile(-w)']
+            fsyncPerWrite = row['fsyncPerWrite(-Y)']
+            numProc = row['numProc']
+            numNodes = row['numNode']
+
+            jobName = 'iteration' + str(iteration + 1) + '.' + point + '.' + str(system) + '.' + str(numBB) + '.' + str(api) + '.' + str(blockSize) + '.' + str(collective) + '.' + str(fsync) \
+                + '.' + str(useExistingTestFile) + '.' + str(filePerProc) + '.' + str(intraTestBarriers) + '.' + str(setAlignment) \
+                + '.' + str(keepFile) + '.' + str(memoryPerNode) + '.' + str(noFill) + '.' + str(preallocate) + '.' + str(readFile) \
+                + '.' + str(segment) + '.' + str(transferSize) + '.' + str(uniqueDir) + '.' + str(useFileView) + '.' + str(writeFile) \
+                + '.' + str(fsyncPerWrite) + '.' + str(numProc)
+
+            filename = baseDir + '/jobs/' + jobName + '.sh'
+
+            blockSizeByte = toByte(blockSize)
+            wtime = 1 + 2 ** math.ceil((math.log(blockSizeByte / 1024, 32)))
+            wtime = math.ceil(wtime * (1 + numNodes / 8))
+
+            generateLassenHeader(filename, numNodes, wtime, jobName, jobName)
+            
+            with open(filename, "a") as script:
+                script.write("export NUM_PROC=" + str(numProc) + "\n")
+                script.write("export NUM_NODES=" + str(numNodes) + "\n")
+                script.write("export FILE_SYSTEM=" + system + "\n")
+                script.write("export NUM_BB_SERVERS=" + str(numBB) + "\n")
+                script.write("\n")
+
+                script.write("export JOB_HOME=/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints\n")
+                script.write("export BIN_PATH=/g/g92/xu23/gpfs1/local/ior-3.3.0/bin\n")
+                script.write("export RECORDER_PATH=/g/g92/xu23/gpfs1/local/recorder-2.2\n")
+                script.write("export DARSHAN_PATH=/g/g92/xu23/gpfs1/local/darshan-3.3.1\n")
+                script.write("export PROFILES=/p/gpfs1/xu23/research/io-experiments/ior/extremePoints/profiles\n")     
+                script.write("\n")     
+                
+                script.write("export API=" + str(api) + "\n")     
+                script.write("export BLOCK_SIZE=" + str(blockSize) + "\n")     
+                script.write("export SET_ALIGNMENT=" + str(setAlignment) + "\n")
+                script.write("export MEMORY_PER_NODE=" + str(memoryPerNode) + "\n")
+                script.write("export SEGMENT=" + str(segment) + "\n")     
+                script.write("export TRANSFER_SIZE=" + str(transferSize) + "\n")     
+                script.write("\n")
+
+                script.write("mkdir -p /g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints/app-output-files/" + jobName + "\n")
+                script.write("cp /g/g92/xu23/gpfs1/research/io-experiments/ior/ior-util.py /g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints/app-output-files/" + jobName + "\n")
+                script.write("cd /g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints/app-output-files/" + jobName + "\n")
+                script.write("\n")
+
+                script.write("export RECORDER_TRACES_DIR=/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints/app-output-files/" + jobName + "\n")
+
+
+                execution = "-r 32 -n ${NUM_PROC} ${BIN_PATH}/ior -a ${API} -b ${BLOCK_SIZE} -J ${SET_ALIGNMENT} -M ${MEMORY_PER_NODE} -s ${SEGMENT} -t ${TRANSFER_SIZE}"
+                
+                if collective == 1:
+                    execution += " -c"
+                if fsync == 1:
+                    execution += " -e"
+                if filePerProc == 1:
+                    execution += " -F"
+                if intraTestBarriers == 1:
+                    execution += " -g"
+                if noFill == 1:
+                    execution += " -n"
+                if preallocate == 1:
+                    execution += " -p"
+                if uniqueDir == 1:
+                    execution += " -u"
+                if useFileView == 1:
+                    execution += " -V"
+                if fsyncPerWrite == 1:
+                    execution += " -Y"
+
+                redirect = " &>> $JOB_HOME/app-stdio/" + jobName + ".txt\n"
+                    
+                script.write("printf \"start\\n\" > $JOB_HOME/app-stdio/" + jobName + ".txt\n")                
+
+                script.write("printf \"\\nwrite scratch\\n\"" + redirect)
+                execution1 = execution + " -w -k -o testFile" + redirect
+                if row['write-scratch']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution1)
+                else:
+                    script.write("jsrun " + execution1)
+
+                script.write("printf \"\\nWAW\\n\"" + redirect)
+                execution2 = execution + " -w -E -k -o testFile" + redirect
+                if row['write-after-write']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution2)
+                else:
+                    script.write("jsrun " + execution2)
+
+                script.write("printf \"\\nRAW\\n\"" + redirect)
+                execution3 = execution + " -r -k -o testFile" + redirect
+                if row['read-after-write']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution3)
+                else:
+                    script.write("jsrun " + execution3)
+                
+                script.write("python3 ior-util.py rename renamed " + str(uniqueDir) + "\n")
+
+                script.write("printf \"\\nread renamed\\n\"" + redirect)
+                execution4 = ''
+                if uniqueDir == 1:
+                    execution4 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution4 = execution + " -r -k -o renamed-testFile"
+                execution4 += redirect
+                if row['read-renamed']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution4)
+                else:
+                    script.write("jsrun " + execution4)
+
+                script.write("printf \"\\nRAR\\n\"" + redirect)
+                execution5 = ''
+                if uniqueDir == 1:
+                    execution5 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution5 = execution + " -r -k -o renamed-testFile"
+                execution5 += redirect
+                if row['read-after-read']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution5)
+                else:
+                    script.write("jsrun " + execution5)
+
+                script.write("printf \"\\nWAR\\n\"" + redirect)
+                execution6 = ''
+                if uniqueDir == 1:
+                    execution6 = execution + " -w -E -o trenamed-estFile"
+                else:
+                    execution6 = execution + " -w -E -o renamed-testFile"
+                execution6 += redirect
+                if row['write-after-read']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution6)
+                else:
+                    script.write("jsrun " + execution6)
+
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
+
+                script.write("python3 ./ior-util.py prepareFileGpfs " + str(uniqueDir) + " " + str(filePerProc) + " " + str(numProc) + " touchedTestFile" + "\n")
+
+                script.write("printf \"\\nwrite touched file\\n\"" + redirect)
+                execution7 = execution + " -w -E -o touchedTestFile" + redirect
+                if row['write-touched-file']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution7)
+                else:
+                    script.write("jsrun " + execution7)
+
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
+
+                script.write("\n")
+
+                script.write("mv $RECORDER_TRACES_DIR/recorder-logs $PROFILES/" + jobName + ".recorder-log\n")
+
+                # script.write("export MY_DARSHAN_LOG_DIR=$PROFILES\n")
+                # script.write("export DXT_ENABLE_IO_TRACE=1\n")
+                # script.write("jsrun -E LD_PRELOAD=${DARSHAN_PATH}/lib/libdarshan.so " + execution)
+                # script.write("\n")
+
+                numJob += 1
+    print(numJob)
+    return numJob
+
+def generateLassenBBExtremePoints(baseDir='/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints'):
+    numJob = 0
+    df = pd.read_csv(baseDir + '/extreme-points.csv')
+    for iteration in range(5):
+        for index, row in df.iterrows():
+            system = 'lassen-bb'
+            numBB = 1
+            point = row['point']
+            api = row['api(-a)']
+            blockSize = row['blockSize(-b)']
+            collective = row['collective(-c)']
+            fsync = row['fsync(-e)']
+            useExistingTestFile = row['useExistingTestFile(-E)']
+            filePerProc = row['filePerProc(-F)']
+            intraTestBarriers = row['intraTestBarriers(-g)']
+            setAlignment = row['setAlignment(-J)']
+            keepFile = row['keepFile(-k)']
+            memoryPerNode = row['memoryPerNode(-M)']
+            noFill = row['noFill(-n)']
+            preallocate = row['preallocate(-p)']
+            readFile = row['readFile(-r)']
+            segment = row['segment(-s)']
+            transferSize = row['transferSize(-t)']
+            uniqueDir = row['uniqueDir(-u)']
+            useFileView = row['useFileView(-V)']
+            writeFile = row['writeFile(-w)']
+            fsyncPerWrite = row['fsyncPerWrite(-Y)']
+            numProc = row['numProc']
+            numNodes = row['numNode']
+
+            jobName = 'iteration' + str(iteration + 1) + '.' + point + '.' + str(system) + '.' + str(numBB) + '.' + str(api) + '.' + str(blockSize) + '.' + str(collective) + '.' + str(fsync) \
+                + '.' + str(useExistingTestFile) + '.' + str(filePerProc) + '.' + str(intraTestBarriers) + '.' + str(setAlignment) \
+                + '.' + str(keepFile) + '.' + str(memoryPerNode) + '.' + str(noFill) + '.' + str(preallocate) + '.' + str(readFile) \
+                + '.' + str(segment) + '.' + str(transferSize) + '.' + str(uniqueDir) + '.' + str(useFileView) + '.' + str(writeFile) \
+                + '.' + str(fsyncPerWrite) + '.' + str(numProc)
+
+            filename = baseDir + '/jobs/' + jobName + '.sh'
+
+            blockSizeByte = toByte(blockSize)
+            wtime = 1 + 2 ** math.ceil((math.log(blockSizeByte / 1024, 32)))
+            wtime = math.ceil(wtime * (1 + numNodes / 8))
+
+            generateLassenHeader(filename, numNodes, wtime, jobName, jobName)
+                
+            with open(filename, "a") as script:
+                script.write("export NUM_PROC=" + str(numProc) + "\n")
+                script.write("export NUM_NODES=" + str(numNodes) + "\n")
+                script.write("export FILE_SYSTEM=" + system + "\n")
+                script.write("export NUM_BB_SERVERS=" + str(numBB) + "\n")
+                script.write("\n")
+
+                script.write("export JOB_HOME=/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints\n")
+                script.write("export BIN_PATH=/g/g92/xu23/gpfs1/local/ior-3.3.0/bin\n")
+                script.write("export RECORDER_PATH=/g/g92/xu23/gpfs1/local/recorder-2.2\n")
+                script.write("export DARSHAN_PATH=/g/g92/xu23/gpfs1/local/darshan-3.3.1\n")
+                script.write("export PROFILES=/p/gpfs1/xu23/research/io-experiments/ior/extremePoints/profiles\n")     
+                script.write("\n")     
+                
+                script.write("export API=" + str(api) + "\n")     
+                script.write("export BLOCK_SIZE=" + str(blockSize) + "\n")     
+                script.write("export SET_ALIGNMENT=" + str(setAlignment) + "\n")
+                script.write("export MEMORY_PER_NODE=" + str(memoryPerNode) + "\n")
+                script.write("export SEGMENT=" + str(segment) + "\n")     
+                script.write("export TRANSFER_SIZE=" + str(transferSize) + "\n")     
+                script.write("\n")
+
+                script.write("mkdir -p /g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints/app-output-files/" + jobName + "\n")
+                script.write("jsrun -r 1 -n ${NUM_NODES} mkdir -p $BBPATH/" + jobName + "\n")
+                script.write("jsrun -r 1 -n ${NUM_NODES} cp /g/g92/xu23/gpfs1/research/io-experiments/ior/ior-util.py $BBPATH/" + jobName + "\n")
+                script.write("cd $BBPATH/" + jobName + "\n")
+                script.write("\n")
+
+                script.write("export RECORDER_TRACES_DIR=/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePoints/app-output-files/" + jobName + "\n")
+
+                execution = "-r 32 -n ${NUM_PROC} ${BIN_PATH}/ior -a ${API} -b ${BLOCK_SIZE} -J ${SET_ALIGNMENT} -M ${MEMORY_PER_NODE} -s ${SEGMENT} -t ${TRANSFER_SIZE}"
+                
+                if collective == 1:
+                    execution += " -c"
+                if fsync == 1:
+                    execution += " -e"
+                if filePerProc == 1:
+                    execution += " -F"
+                if intraTestBarriers == 1:
+                    execution += " -g"
+                if noFill == 1:
+                    execution += " -n"
+                if preallocate == 1:
+                    execution += " -p"
+                if uniqueDir == 1:
+                    execution += " -u"
+                if useFileView == 1:
+                    execution += " -V"
+                if fsyncPerWrite == 1:
+                    execution += " -Y"
+
+                redirect = " &>> $JOB_HOME/app-stdio/" + jobName + ".txt\n"
+                    
+                script.write("printf \"start\\n\" > $JOB_HOME/app-stdio/" + jobName + ".txt\n")                
+
+                script.write("printf \"\\nwrite scratch\\n\"" + redirect)
+                execution1 = execution + " -w -k -o testFile" + redirect
+                if row['write-scratch']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution1)
+                else:
+                    script.write("jsrun " + execution1)
+
+                script.write("printf \"\\nWAW\\n\"" + redirect)
+                execution2 = execution + " -w -E -k -o testFile" + redirect
+                if row['write-after-write']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution2)
+                else:
+                    script.write("jsrun " + execution2)
+
+                script.write("printf \"\\nRAW\\n\"" + redirect)
+                execution3 = execution + " -r -k -o testFile" + redirect
+                if row['read-after-write']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution3)
+                else:
+                    script.write("jsrun " + execution3)
+                
+                script.write("jsrun -r 1 -n ${NUM_NODES} python3 ior-util.py rename renamed " + str(uniqueDir) + "\n")
+
+                script.write("printf \"\\nread renamed\\n\"" + redirect)
+                execution4 = ''
+                if uniqueDir == 1:
+                    execution4 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution4 = execution + " -r -k -o renamed-testFile"
+                execution4 += redirect
+                if row['read-renamed']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution4)
+                else:
+                    script.write("jsrun " + execution4)
+
+                script.write("printf \"\\nRAR\\n\"" + redirect)
+                execution5 = ''
+                if uniqueDir == 1:
+                    execution5 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution5 = execution + " -r -k -o renamed-testFile"
+                execution5 += redirect
+                if row['read-after-read']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution5)
+                else:
+                    script.write("jsrun " + execution5)
+
+                script.write("printf \"\\nWAR\\n\"" + redirect)
+                execution6 = ''
+                if uniqueDir == 1:
+                    execution6 = execution + " -w -E -o trenamed-estFile"
+                else:
+                    execution6 = execution + " -w -E -o renamed-testFile"
+                execution6 += redirect
+                if row['write-after-read']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution6)
+                else:
+                    script.write("jsrun " + execution6)
+
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
+
+                script.write("jsrun -r 32 -n ${NUM_PROC} python3 ./ior-util.py prepareFileBB " + str(uniqueDir) + " touchedTestFile" + "\n")
+
+                script.write("printf \"\\nwrite touched file\\n\"" + redirect)
+                execution7 = execution + " -w -E -o touchedTestFile" + redirect
+                if row['write-touched-file']:
+                    script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution7)
+                else:
+                    script.write("jsrun " + execution7)
+
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
+
+                script.write("\n")
+
+                script.write("mv $RECORDER_TRACES_DIR/recorder-logs $PROFILES/" + jobName + ".recorder-log\n")
+                
+                # script.write("export MY_DARSHAN_LOG_DIR=$PROFILES\n")
+                # script.write("export DXT_ENABLE_IO_TRACE=1\n")
+                # script.write("jsrun -E LD_PRELOAD=${DARSHAN_PATH}/lib/libdarshan.so " + execution)
+                # script.write("\n")
+
+                numJob += 1
+    print(numJob)
+    return numJob
+
+def generateLassenGpfsExtremePointsNoRecorder(baseDir='/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder'):
+    numJob = 0
+    df = pd.read_csv(baseDir + '/extreme-points.csv')
+    for iteration in range(5):
+        for index, row in df.iterrows():
+            system = 'lassen-gpfs'
+            numBB = 0
+            point = row['point']
+            api = row['api(-a)']
+            blockSize = row['blockSize(-b)']
+            collective = row['collective(-c)']
+            fsync = row['fsync(-e)']
+            useExistingTestFile = row['useExistingTestFile(-E)']
+            filePerProc = row['filePerProc(-F)']
+            intraTestBarriers = row['intraTestBarriers(-g)']
+            setAlignment = row['setAlignment(-J)']
+            keepFile = row['keepFile(-k)']
+            memoryPerNode = row['memoryPerNode(-M)']
+            noFill = row['noFill(-n)']
+            preallocate = row['preallocate(-p)']
+            readFile = row['readFile(-r)']
+            segment = row['segment(-s)']
+            transferSize = row['transferSize(-t)']
+            uniqueDir = row['uniqueDir(-u)']
+            useFileView = row['useFileView(-V)']
+            writeFile = row['writeFile(-w)']
+            fsyncPerWrite = row['fsyncPerWrite(-Y)']
+            numProc = row['numProc']
+            numNodes = row['numNode']
+
+            jobName = 'iteration' + str(iteration + 1) + '.' + point + '.' + str(system) + '.' + str(numBB) + '.' + str(api) + '.' + str(blockSize) + '.' + str(collective) + '.' + str(fsync) \
+                + '.' + str(useExistingTestFile) + '.' + str(filePerProc) + '.' + str(intraTestBarriers) + '.' + str(setAlignment) \
+                + '.' + str(keepFile) + '.' + str(memoryPerNode) + '.' + str(noFill) + '.' + str(preallocate) + '.' + str(readFile) \
+                + '.' + str(segment) + '.' + str(transferSize) + '.' + str(uniqueDir) + '.' + str(useFileView) + '.' + str(writeFile) \
+                + '.' + str(fsyncPerWrite) + '.' + str(numProc)
+
+            filename = baseDir + '/jobs/' + jobName + '.sh'
+
+            blockSizeByte = toByte(blockSize)
+            wtime = 1 + 2 ** math.ceil((math.log(blockSizeByte / 1024, 32)))
+            wtime = math.ceil(wtime * (1 + numNodes / 8))
+
+            generateLassenHeader(filename, numNodes, wtime, jobName, jobName)
+            
+            with open(filename, "a") as script:
+                script.write("export NUM_PROC=" + str(numProc) + "\n")
+                script.write("export NUM_NODES=" + str(numNodes) + "\n")
+                script.write("export FILE_SYSTEM=" + system + "\n")
+                script.write("export NUM_BB_SERVERS=" + str(numBB) + "\n")
+                script.write("\n")
+
+                script.write("export JOB_HOME=/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder\n")
+                script.write("export BIN_PATH=/g/g92/xu23/gpfs1/local/ior-3.3.0/bin\n")
+                script.write("export RECORDER_PATH=/g/g92/xu23/gpfs1/local/recorder-2.2\n")
+                script.write("export DARSHAN_PATH=/g/g92/xu23/gpfs1/local/darshan-3.3.1\n")
+                script.write("export PROFILES=/p/gpfs1/xu23/research/io-experiments/ior/extremePointsNoRecorder/profiles\n")     
+                script.write("\n")     
+                
+                script.write("export API=" + str(api) + "\n")     
+                script.write("export BLOCK_SIZE=" + str(blockSize) + "\n")     
+                script.write("export SET_ALIGNMENT=" + str(setAlignment) + "\n")
+                script.write("export MEMORY_PER_NODE=" + str(memoryPerNode) + "\n")
+                script.write("export SEGMENT=" + str(segment) + "\n")     
+                script.write("export TRANSFER_SIZE=" + str(transferSize) + "\n")     
+                script.write("\n")
+
+                script.write("mkdir -p /g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder/app-output-files/" + jobName + "\n")
+                script.write("cp /g/g92/xu23/gpfs1/research/io-experiments/ior/ior-util.py /g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder/app-output-files/" + jobName + "\n")
+                script.write("cd /g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder/app-output-files/" + jobName + "\n")
+                script.write("\n")
+
+                script.write("export RECORDER_TRACES_DIR=/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder/app-output-files/" + jobName + "\n")
+
+
+                execution = "-r 32 -n ${NUM_PROC} ${BIN_PATH}/ior -a ${API} -b ${BLOCK_SIZE} -J ${SET_ALIGNMENT} -M ${MEMORY_PER_NODE} -s ${SEGMENT} -t ${TRANSFER_SIZE}"
+                
+                if collective == 1:
+                    execution += " -c"
+                if fsync == 1:
+                    execution += " -e"
+                if filePerProc == 1:
+                    execution += " -F"
+                if intraTestBarriers == 1:
+                    execution += " -g"
+                if noFill == 1:
+                    execution += " -n"
+                if preallocate == 1:
+                    execution += " -p"
+                if uniqueDir == 1:
+                    execution += " -u"
+                if useFileView == 1:
+                    execution += " -V"
+                if fsyncPerWrite == 1:
+                    execution += " -Y"
+
+                redirect = " &>> $JOB_HOME/app-stdio/" + jobName + ".txt\n"
+                    
+                script.write("printf \"start\\n\" > $JOB_HOME/app-stdio/" + jobName + ".txt\n")                
+
+                script.write("printf \"\\nwrite scratch\\n\"" + redirect)
+                execution1 = execution + " -w -k -o testFile" + redirect
+                script.write("jsrun " + execution1)
+
+                script.write("printf \"\\nWAW\\n\"" + redirect)
+                execution2 = execution + " -w -E -k -o testFile" + redirect
+                script.write("jsrun " + execution2)
+
+                script.write("printf \"\\nRAW\\n\"" + redirect)
+                execution3 = execution + " -r -k -o testFile" + redirect
+                script.write("jsrun " + execution3)
+                
+                script.write("python3 ior-util.py rename renamed " + str(uniqueDir) + "\n")
+
+                script.write("printf \"\\nread renamed\\n\"" + redirect)
+                execution4 = ''
+                if uniqueDir == 1:
+                    execution4 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution4 = execution + " -r -k -o renamed-testFile"
+                execution4 += redirect
+                script.write("jsrun " + execution4)
+
+                script.write("printf \"\\nRAR\\n\"" + redirect)
+                execution5 = ''
+                if uniqueDir == 1:
+                    execution5 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution5 = execution + " -r -k -o renamed-testFile"
+                execution5 += redirect
+                script.write("jsrun " + execution5)
+
+                script.write("printf \"\\nWAR\\n\"" + redirect)
+                execution6 = ''
+                if uniqueDir == 1:
+                    execution6 = execution + " -w -E -o trenamed-estFile"
+                else:
+                    execution6 = execution + " -w -E -o renamed-testFile"
+                execution6 += redirect
+                script.write("jsrun " + execution6)
+
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
+
+                script.write("python3 ./ior-util.py prepareFileGpfs " + str(uniqueDir) + " " + str(filePerProc) + " " + str(numProc) + " touchedTestFile" + "\n")
+
+                script.write("printf \"\\nwrite touched file\\n\"" + redirect)
+                execution7 = execution + " -w -E -o touchedTestFile" + redirect
+                script.write("jsrun " + execution7)
+
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
+
+                script.write("\n")
+
+
+                # script.write("export MY_DARSHAN_LOG_DIR=$PROFILES\n")
+                # script.write("export DXT_ENABLE_IO_TRACE=1\n")
+                # script.write("jsrun -E LD_PRELOAD=${DARSHAN_PATH}/lib/libdarshan.so " + execution)
+                # script.write("\n")
+
+                numJob += 1
+    print(numJob)
+    return numJob
+
+def generateLassenBBExtremePointsNoRecorder(baseDir='/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder'):
+    numJob = 0
+    df = pd.read_csv(baseDir + '/extreme-points.csv')
+    for iteration in range(5):
+        for index, row in df.iterrows():
+            system = 'lassen-bb'
+            numBB = 1
+            point = row['point']
+            api = row['api(-a)']
+            blockSize = row['blockSize(-b)']
+            collective = row['collective(-c)']
+            fsync = row['fsync(-e)']
+            useExistingTestFile = row['useExistingTestFile(-E)']
+            filePerProc = row['filePerProc(-F)']
+            intraTestBarriers = row['intraTestBarriers(-g)']
+            setAlignment = row['setAlignment(-J)']
+            keepFile = row['keepFile(-k)']
+            memoryPerNode = row['memoryPerNode(-M)']
+            noFill = row['noFill(-n)']
+            preallocate = row['preallocate(-p)']
+            readFile = row['readFile(-r)']
+            segment = row['segment(-s)']
+            transferSize = row['transferSize(-t)']
+            uniqueDir = row['uniqueDir(-u)']
+            useFileView = row['useFileView(-V)']
+            writeFile = row['writeFile(-w)']
+            fsyncPerWrite = row['fsyncPerWrite(-Y)']
+            numProc = row['numProc']
+            numNodes = row['numNode']
+
+            jobName = 'iteration' + str(iteration + 1) + '.' + point + '.' + str(system) + '.' + str(numBB) + '.' + str(api) + '.' + str(blockSize) + '.' + str(collective) + '.' + str(fsync) \
+                + '.' + str(useExistingTestFile) + '.' + str(filePerProc) + '.' + str(intraTestBarriers) + '.' + str(setAlignment) \
+                + '.' + str(keepFile) + '.' + str(memoryPerNode) + '.' + str(noFill) + '.' + str(preallocate) + '.' + str(readFile) \
+                + '.' + str(segment) + '.' + str(transferSize) + '.' + str(uniqueDir) + '.' + str(useFileView) + '.' + str(writeFile) \
+                + '.' + str(fsyncPerWrite) + '.' + str(numProc)
+
+            filename = baseDir + '/jobs/' + jobName + '.sh'
+
+            blockSizeByte = toByte(blockSize)
+            wtime = 1 + 2 ** math.ceil((math.log(blockSizeByte / 1024, 32)))
+            wtime = math.ceil(wtime * (1 + numNodes / 8))
+
+            generateLassenHeader(filename, numNodes, wtime, jobName, jobName)
+                
+            with open(filename, "a") as script:
+                script.write("export NUM_PROC=" + str(numProc) + "\n")
+                script.write("export NUM_NODES=" + str(numNodes) + "\n")
+                script.write("export FILE_SYSTEM=" + system + "\n")
+                script.write("export NUM_BB_SERVERS=" + str(numBB) + "\n")
+                script.write("\n")
+
+                script.write("export JOB_HOME=/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder\n")
+                script.write("export BIN_PATH=/g/g92/xu23/gpfs1/local/ior-3.3.0/bin\n")
+                script.write("export RECORDER_PATH=/g/g92/xu23/gpfs1/local/recorder-2.2\n")
+                script.write("export DARSHAN_PATH=/g/g92/xu23/gpfs1/local/darshan-3.3.1\n")
+                script.write("export PROFILES=/p/gpfs1/xu23/research/io-experiments/ior/extremePointsNoRecorder/profiles\n")     
+                script.write("\n")     
+                
+                script.write("export API=" + str(api) + "\n")     
+                script.write("export BLOCK_SIZE=" + str(blockSize) + "\n")     
+                script.write("export SET_ALIGNMENT=" + str(setAlignment) + "\n")
+                script.write("export MEMORY_PER_NODE=" + str(memoryPerNode) + "\n")
+                script.write("export SEGMENT=" + str(segment) + "\n")     
+                script.write("export TRANSFER_SIZE=" + str(transferSize) + "\n")     
+                script.write("\n")
+
+                script.write("mkdir -p /g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder/app-output-files/" + jobName + "\n")
+                script.write("jsrun -r 1 -n ${NUM_NODES} mkdir -p $BBPATH/" + jobName + "\n")
+                script.write("jsrun -r 1 -n ${NUM_NODES} cp /g/g92/xu23/gpfs1/research/io-experiments/ior/ior-util.py $BBPATH/" + jobName + "\n")
+                script.write("cd $BBPATH/" + jobName + "\n")
+                script.write("\n")
+
+                script.write("export RECORDER_TRACES_DIR=/g/g92/xu23/gpfs1/research/io-experiments/ior/extremePointsNoRecorder/app-output-files/" + jobName + "\n")
+
+                execution = "-r 32 -n ${NUM_PROC} ${BIN_PATH}/ior -a ${API} -b ${BLOCK_SIZE} -J ${SET_ALIGNMENT} -M ${MEMORY_PER_NODE} -s ${SEGMENT} -t ${TRANSFER_SIZE}"
+                
+                if collective == 1:
+                    execution += " -c"
+                if fsync == 1:
+                    execution += " -e"
+                if filePerProc == 1:
+                    execution += " -F"
+                if intraTestBarriers == 1:
+                    execution += " -g"
+                if noFill == 1:
+                    execution += " -n"
+                if preallocate == 1:
+                    execution += " -p"
+                if uniqueDir == 1:
+                    execution += " -u"
+                if useFileView == 1:
+                    execution += " -V"
+                if fsyncPerWrite == 1:
+                    execution += " -Y"
+
+                redirect = " &>> $JOB_HOME/app-stdio/" + jobName + ".txt\n"
+                    
+                script.write("printf \"start\\n\" > $JOB_HOME/app-stdio/" + jobName + ".txt\n")                
+
+                script.write("printf \"\\nwrite scratch\\n\"" + redirect)
+                execution1 = execution + " -w -k -o testFile" + redirect
+                script.write("jsrun " + execution1)
+
+                script.write("printf \"\\nWAW\\n\"" + redirect)
+                execution2 = execution + " -w -E -k -o testFile" + redirect
+                script.write("jsrun " + execution2)
+
+                script.write("printf \"\\nRAW\\n\"" + redirect)
+                execution3 = execution + " -r -k -o testFile" + redirect
+                script.write("jsrun " + execution3)
+                
+                script.write("jsrun -r 1 -n ${NUM_NODES} python3 ior-util.py rename renamed " + str(uniqueDir) + "\n")
+
+                script.write("printf \"\\nread renamed\\n\"" + redirect)
+                execution4 = ''
+                if uniqueDir == 1:
+                    execution4 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution4 = execution + " -r -k -o renamed-testFile"
+                execution4 += redirect
+                script.write("jsrun " + execution4)
+
+                script.write("printf \"\\nRAR\\n\"" + redirect)
+                execution5 = ''
+                if uniqueDir == 1:
+                    execution5 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution5 = execution + " -r -k -o renamed-testFile"
+                execution5 += redirect
+                script.write("jsrun " + execution5)
+
+                script.write("printf \"\\nWAR\\n\"" + redirect)
+                execution6 = ''
+                if uniqueDir == 1:
+                    execution6 = execution + " -w -E -o trenamed-estFile"
+                else:
+                    execution6 = execution + " -w -E -o renamed-testFile"
+                execution6 += redirect
+                script.write("jsrun " + execution6)
+
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
+
+                script.write("jsrun -r 32 -n ${NUM_PROC} python3 ./ior-util.py prepareFileBB " + str(uniqueDir) + " touchedTestFile" + "\n")
+
+                script.write("printf \"\\nwrite touched file\\n\"" + redirect)
+                execution7 = execution + " -w -E -o touchedTestFile" + redirect
+                script.write("jsrun " + execution7)
+
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
+
+                script.write("\n")
+
+                
+                # script.write("export MY_DARSHAN_LOG_DIR=$PROFILES\n")
+                # script.write("export DXT_ENABLE_IO_TRACE=1\n")
+                # script.write("jsrun -E LD_PRELOAD=${DARSHAN_PATH}/lib/libdarshan.so " + execution)
+                # script.write("\n")
+
+                numJob += 1
+    print(numJob)
+    return numJob
+
+
 def generateLassenGpfsIOR(scriptPath='/g/g92/xu23/gpfs1/research/io-experiments/ior/gpfs/jobs'):
-    previousJobName = ''
     numJob = 0
     df = generateIOROptions()
     df = df[df['system'] == 'lassen-gpfs'].copy()
-    # df1 = df[(df['useExistingTestFile(-E)'] == 1) & (df['filePerProc(-F)'] == 1) & (df['uniqueDir(-u)'] == 1)].head(3).copy()
-    # df2 = df[(df['useExistingTestFile(-E)'] == 1) & (df['filePerProc(-F)'] == 0) & (df['uniqueDir(-u)'] == 0)].head(3).copy()
-    # df3 = df[(df['useExistingTestFile(-E)'] == 1) & (df['filePerProc(-F)'] == 1) & (df['uniqueDir(-u)'] == 0)].head(3).copy()
-    # df = pd.concat([df1, df2, df3])
-    for index, row in df.iterrows():
-        system = row['system']
-        numBB = row['numBB']
-        if system != 'cori-bb' and numBB != 1:
-            continue
-        if system == 'lassen-gpfs' or system == 'summit-gpfs' or system == 'cori-lustre':
-            numBB = 0
-        api = row['api(-a)']
-        blockSize = row['blockSize(-b)']
-        collective = row['collective(-c)']
-        if api == 'POSIX' and collective == 1:
-            continue
-        fsync = row['fsync(-e)']
-        if api != 'POSIX' and fsync == 1:
-            continue
-        useExistingTestFile = row['useExistingTestFile(-E)']
-        filePerProc = row['filePerProc(-F)']
-        if (system == 'lassen-bb' or system == 'summit-bb') and filePerProc == 0:
-            continue
-        intraTestBarriers = row['intraTestBarriers(-g)']
-        setAlignment = row['setAlignment(-J)']
-        if api != 'HDF5' and setAlignment != 1:
-            continue
-        keepFile = row['keepFile(-k)']
-        memoryPerNode = row['memoryPerNode(-M)']
-        noFill = row['noFill(-n)']
-        if api != 'HDF5' and noFill == 1:
-            continue
-        preallocate = row['preallocate(-p)']
-        if api != 'MPIIO' and preallocate != 0:
-            continue
-        readFile = row['readFile(-r)']
-        segment = row['segment(-s)']
-        transferSize = row['transferSize(-t)']
-        uniqueDir = row['uniqueDir(-u)']
-        if uniqueDir == 1 and filePerProc != 1:
-            continue
-        useFileView = row['useFileView(-V)']
-        writeFile = row['writeFile(-w)']
-        fsyncPerWrite = row['fsyncPerWrite(-Y)']
-        if api != 'POSIX' and fsyncPerWrite == 1:
-            continue
-        numProc = row['numProc']
-        numNodes = row['numNodes']
+    df = df[df['numProc'] == 64].copy()
+    # df = df.head(2).copy()
+    for iteration in range(numIteration):
+        for index, row in df.iterrows():
+            system = row['system']
+            numBB = row['numBB']
+            if system != 'cori-bb' and numBB != 1:
+                continue
+            if system == 'lassen-gpfs' or system == 'summit-gpfs' or system == 'cori-lustre':
+                numBB = 0
+            api = row['api(-a)']
+            blockSize = row['blockSize(-b)']
+            collective = row['collective(-c)']
+            if api == 'POSIX' and collective == 1:
+                continue
+            fsync = row['fsync(-e)']
+            if api != 'POSIX' and fsync == 1:
+                continue
+            useExistingTestFile = row['useExistingTestFile(-E)']
+            filePerProc = row['filePerProc(-F)']
+            if (system == 'lassen-bb' or system == 'summit-bb') and filePerProc == 0:
+                continue
+            intraTestBarriers = row['intraTestBarriers(-g)']
+            setAlignment = row['setAlignment(-J)']
+            if api != 'HDF5' and setAlignment != 1:
+                continue
+            keepFile = row['keepFile(-k)']
+            memoryPerNode = row['memoryPerNode(-M)']
+            noFill = row['noFill(-n)']
+            if api != 'HDF5' and noFill == 1:
+                continue
+            preallocate = row['preallocate(-p)']
+            if api != 'MPIIO' and preallocate != 0:
+                continue
+            readFile = row['readFile(-r)']
+            segment = row['segment(-s)']
+            transferSize = row['transferSize(-t)']
+            uniqueDir = row['uniqueDir(-u)']
+            if uniqueDir == 1 and filePerProc != 1:
+                continue
+            useFileView = row['useFileView(-V)']
+            if api != 'MPIIO' and useFileView != 0:
+                continue
+            writeFile = row['writeFile(-w)']
+            fsyncPerWrite = row['fsyncPerWrite(-Y)']
+            if api != 'POSIX' and fsyncPerWrite == 1:
+                continue
+            numProc = row['numProc']
+            numNodes = row['numNodes']
 
-        jobName = str(system) + '.' + str(numBB) + '.' + str(api) + '.' + str(blockSize) + '.' + str(collective) + '.' + str(fsync) \
-            + '.' + str(useExistingTestFile) + '.' + str(filePerProc) + '.' + str(intraTestBarriers) + '.' + str(setAlignment) \
-            + '.' + str(keepFile) + '.' + str(memoryPerNode) + '.' + str(noFill) + '.' + str(preallocate) + '.' + str(readFile) \
-            + '.' + str(segment) + '.' + str(transferSize) + '.' + str(uniqueDir) + '.' + str(useFileView) + '.' + str(writeFile) \
-            + '.' + str(fsyncPerWrite) + '.' + str(numProc)
+            jobName = 'iteration' + str(iteration + 1) + '.' \
+                + str(system) + '.' + str(numBB) + '.' + str(api) + '.' + str(blockSize) + '.' + str(collective) + '.' + str(fsync) \
+                + '.' + str(useExistingTestFile) + '.' + str(filePerProc) + '.' + str(intraTestBarriers) + '.' + str(setAlignment) \
+                + '.' + str(keepFile) + '.' + str(memoryPerNode) + '.' + str(noFill) + '.' + str(preallocate) + '.' + str(readFile) \
+                + '.' + str(segment) + '.' + str(transferSize) + '.' + str(uniqueDir) + '.' + str(useFileView) + '.' + str(writeFile) \
+                + '.' + str(fsyncPerWrite) + '.' + str(numProc)
 
-        filename = scriptPath + '/' + jobName + '.sh'
+            filename = scriptPath + '/' + jobName + '.sh'
 
-        # if numProc == 512:
-        #     if previousJobName != '':
-        #         generateLassenHeader(filename, numNodes, numNodes * 4, jobName, jobName, '\"ended(\"' + previousJobName + '\")\"')
-        #     else:
-        #         generateLassenHeader(filename, numNodes, numNodes * 4, jobName, jobName)
-        #     previousJobName = jobName
-        # else:
-        #     generateLassenHeader(filename, numNodes, numNodes * 4, jobName, jobName)
-        blockSizeByte = toByte(blockSize)
-        wtime = 4 + 2 ** math.ceil((math.log(blockSizeByte / 1024, 32)))
-        wtime = math.ceil(wtime * (1 + numNodes / 8))
+            blockSizeByte = toByte(blockSize)
+            wtime = 1 + 2 ** math.ceil((math.log(blockSizeByte / 1024, 32)))
+            wtime = math.ceil(wtime * (1 + numNodes / 8))
 
-        generateLassenHeader(filename, numNodes, wtime, jobName, jobName)
-        
-        with open(filename, "a") as script:
-            script.write("export NUM_PROC=" + str(numProc) + "\n")
-            script.write("export NUM_NODES=" + str(numNodes) + "\n")
-            script.write("export FILE_SYSTEM=" + system + "\n")
-            script.write("export NUM_BB_SERVERS=" + str(numBB) + "\n")
-            script.write("\n")
-
-            script.write("export JOB_HOME=/g/g92/xu23/gpfs1/research/io-experiments/ior/gpfs\n")
-            script.write("export BIN_PATH=/g/g92/xu23/gpfs1/local/ior-3.3.0/bin\n")
-            script.write("export RECORDER_PATH=/g/g92/xu23/gpfs1/local/recorder-2.2\n")
-            script.write("export DARSHAN_PATH=/g/g92/xu23/gpfs1/local/darshan-3.3.1\n")
-            script.write("export PROFILES=/p/gpfs1/xu23/research/io-experiments/ior/gpfs/profiles\n")     
-            script.write("\n")     
+            generateLassenHeader(filename, numNodes, wtime, jobName, jobName)
             
-            script.write("export API=" + str(api) + "\n")     
-            script.write("export BLOCK_SIZE=" + str(blockSize) + "\n")     
-            script.write("export SET_ALIGNMENT=" + str(setAlignment) + "\n")
-            script.write("export MEMORY_PER_NODE=" + str(memoryPerNode) + "\n")
-            script.write("export SEGMENT=" + str(segment) + "\n")     
-            script.write("export TRANSFER_SIZE=" + str(transferSize) + "\n")     
-            script.write("\n")
+            with open(filename, "a") as script:
+                script.write("export NUM_PROC=" + str(numProc) + "\n")
+                script.write("export NUM_NODES=" + str(numNodes) + "\n")
+                script.write("export FILE_SYSTEM=" + system + "\n")
+                script.write("export NUM_BB_SERVERS=" + str(numBB) + "\n")
+                script.write("\n")
 
-            script.write("mkdir -p /g/g92/xu23/gpfs1/research/io-experiments/ior/gpfs/app-output-files/" + jobName + "\n")
-            script.write("cp /g/g92/xu23/gpfs1/research/io-experiments/ior/ior-util.py /g/g92/xu23/gpfs1/research/io-experiments/ior/gpfs/app-output-files/" + jobName + "\n")
-            script.write("cd /g/g92/xu23/gpfs1/research/io-experiments/ior/gpfs/app-output-files/" + jobName + "\n")
-            script.write("\n")
-
-            execution = "-r 32 -n ${NUM_PROC} ${BIN_PATH}/ior -a ${API} -b ${BLOCK_SIZE} -J ${SET_ALIGNMENT} -M ${MEMORY_PER_NODE} -s ${SEGMENT} -t ${TRANSFER_SIZE}"
-            
-            if collective == 1:
-                execution += " -c"
-            if fsync == 1:
-                execution += " -e"
-            if filePerProc == 1:
-                execution += " -F"
-            if intraTestBarriers == 1:
-                execution += " -g"
-            if noFill == 1:
-                execution += " -n"
-            if preallocate == 1:
-                execution += " -p"
-            if uniqueDir == 1:
-                execution += " -u"
-            if useFileView == 1:
-                execution += " -V"
-            if fsyncPerWrite == 1:
-                execution += " -Y"
-
-            redirect = " &>> $JOB_HOME/app-stdio/" + jobName + ".txt\n"
+                script.write("export JOB_HOME=/g/g92/xu23/gpfs1/research/io-experiments/ior/gpfs\n")
+                script.write("export BIN_PATH=/g/g92/xu23/gpfs1/local/ior-3.3.0/bin\n")
+                script.write("export RECORDER_PATH=/g/g92/xu23/gpfs1/local/recorder-2.2\n")
+                script.write("export DARSHAN_PATH=/g/g92/xu23/gpfs1/local/darshan-3.3.1\n")
+                script.write("export PROFILES=/p/gpfs1/xu23/research/io-experiments/ior/gpfs/profiles\n")     
+                script.write("\n")     
                 
-            script.write("printf \"start\\n\" > $JOB_HOME/app-stdio/" + jobName + ".txt\n")
-            
-            script.write("for ITERATION in")
-            for i in range(1, numIteration + 1):
-                script.write(" " + str(i))
-            script.write("\n")
-            script.write("do\n")
+                script.write("export API=" + str(api) + "\n")     
+                script.write("export BLOCK_SIZE=" + str(blockSize) + "\n")     
+                script.write("export SET_ALIGNMENT=" + str(setAlignment) + "\n")
+                script.write("export MEMORY_PER_NODE=" + str(memoryPerNode) + "\n")
+                script.write("export SEGMENT=" + str(segment) + "\n")     
+                script.write("export TRANSFER_SIZE=" + str(transferSize) + "\n")     
+                script.write("\n")
 
-            script.write("printf \"\\nIteration ${ITERATION}\\n\"" + redirect)
+                script.write("mkdir -p /g/g92/xu23/gpfs1/research/io-experiments/ior/gpfs/app-output-files/" + jobName + "\n")
+                script.write("cp /g/g92/xu23/gpfs1/research/io-experiments/ior/ior-util.py /g/g92/xu23/gpfs1/research/io-experiments/ior/gpfs/app-output-files/" + jobName + "\n")
+                script.write("cd /g/g92/xu23/gpfs1/research/io-experiments/ior/gpfs/app-output-files/" + jobName + "\n")
+                script.write("\n")
 
-            script.write("printf \"\\nwrite scratch\\n\"" + redirect)
-            execution1 = execution + " -w -k -o testFile${ITERATION}" + redirect
-            script.write("    jsrun " + execution1)
+                execution = "-r 32 -n ${NUM_PROC} ${BIN_PATH}/ior -a ${API} -b ${BLOCK_SIZE} -J ${SET_ALIGNMENT} -M ${MEMORY_PER_NODE} -s ${SEGMENT} -t ${TRANSFER_SIZE}"
+                
+                if collective == 1:
+                    execution += " -c"
+                if fsync == 1:
+                    execution += " -e"
+                if filePerProc == 1:
+                    execution += " -F"
+                if intraTestBarriers == 1:
+                    execution += " -g"
+                if noFill == 1:
+                    execution += " -n"
+                if preallocate == 1:
+                    execution += " -p"
+                if uniqueDir == 1:
+                    execution += " -u"
+                if useFileView == 1:
+                    execution += " -V"
+                if fsyncPerWrite == 1:
+                    execution += " -Y"
 
-            script.write("printf \"\\nWAW\\n\"" + redirect)
-            execution2 = execution + " -w -E -k -o testFile${ITERATION}" + redirect
-            script.write("    jsrun " + execution2)
+                redirect = " &>> $JOB_HOME/app-stdio/" + jobName + ".txt\n"
+                    
+                script.write("printf \"start\\n\" > $JOB_HOME/app-stdio/" + jobName + ".txt\n")
 
-            script.write("printf \"\\nRAW\\n\"" + redirect)
-            execution3 = execution + " -r -k -o testFile${ITERATION}" + redirect
-            script.write("    jsrun " + execution3)
-            
-            script.write("    python3 ior-util.py rename renamed " + str(uniqueDir) + "\n")
+                script.write("printf \"\\nwrite scratch\\n\"" + redirect)
+                execution1 = execution + " -w -k -o testFile" + redirect
+                script.write("jsrun " + execution1)
 
-            script.write("printf \"\\nread renamed\\n\"" + redirect)
-            execution4 = ''
-            if uniqueDir == 1:
-                execution4 = execution + " -r -k -o trenamed-estFile${ITERATION}"
-            else:
-                execution4 = execution + " -r -k -o renamed-testFile${ITERATION}"
-            execution4 += redirect
-            script.write("    jsrun " + execution4)
+                script.write("printf \"\\nWAW\\n\"" + redirect)
+                execution2 = execution + " -w -E -k -o testFile" + redirect
+                script.write("jsrun " + execution2)
 
-            script.write("printf \"\\nRAR\\n\"" + redirect)
-            execution5 = ''
-            if uniqueDir == 1:
-                execution5 = execution + " -r -k -o trenamed-estFile${ITERATION}"
-            else:
-                execution5 = execution + " -r -k -o renamed-testFile${ITERATION}"
-            execution5 += redirect
-            script.write("    jsrun " + execution5)
+                script.write("printf \"\\nRAW\\n\"" + redirect)
+                execution3 = execution + " -r -k -o testFile" + redirect
+                script.write("jsrun " + execution3)
+                
+                script.write("python3 ior-util.py rename renamed " + str(uniqueDir) + "\n")
 
-            script.write("printf \"\\nWAR\\n\"" + redirect)
-            execution6 = ''
-            if uniqueDir == 1:
-                execution6 = execution + " -w -E -o trenamed-estFile${ITERATION}"
-            else:
-                execution6 = execution + " -w -E -o renamed-testFile${ITERATION}"
-            execution6 += redirect
-            script.write("    jsrun " + execution6)
+                script.write("printf \"\\nread renamed\\n\"" + redirect)
+                execution4 = ''
+                if uniqueDir == 1:
+                    execution4 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution4 = execution + " -r -k -o renamed-testFile"
+                execution4 += redirect
+                script.write("jsrun " + execution4)
 
-            if uniqueDir == 1:
-                script.write("rm t* -r\n")
+                script.write("printf \"\\nRAR\\n\"" + redirect)
+                execution5 = ''
+                if uniqueDir == 1:
+                    execution5 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution5 = execution + " -r -k -o renamed-testFile"
+                execution5 += redirect
+                script.write("jsrun " + execution5)
 
-            script.write("python3 ./ior-util.py prepareFileGpfs " + str(uniqueDir) + " " + str(filePerProc) + " " + str(numProc) + " touchedTestFile${ITERATION}" + "\n")
+                script.write("printf \"\\nWAR\\n\"" + redirect)
+                execution6 = ''
+                if uniqueDir == 1:
+                    execution6 = execution + " -w -E -o trenamed-estFile"
+                else:
+                    execution6 = execution + " -w -E -o renamed-testFile"
+                execution6 += redirect
+                script.write("jsrun " + execution6)
 
-            script.write("printf \"\\nwrite touched file\\n\"" + redirect)
-            execution7 = execution + " -w -E -o touchedTestFile${ITERATION}" + redirect
-            script.write("    jsrun " + execution7)
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
 
-            if uniqueDir == 1:
-                script.write("rm t* -r\n")
+                script.write("python3 ./ior-util.py prepareFileGpfs " + str(uniqueDir) + " " + str(filePerProc) + " " + str(numProc) + " touchedTestFile" + "\n")
 
-            script.write("done\n")
-            script.write("\n")
+                script.write("printf \"\\nwrite touched file\\n\"" + redirect)
+                execution7 = execution + " -w -E -o touchedTestFile" + redirect
+                script.write("jsrun " + execution7)
 
-            # script.write("export RECORDER_TRACES_DIR=$PROFILES\n")
-            # script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution)
-            # script.write("\n")
-            
-            # script.write("export MY_DARSHAN_LOG_DIR=$PROFILES\n")
-            # script.write("export DXT_ENABLE_IO_TRACE=1\n")
-            # script.write("jsrun -E LD_PRELOAD=${DARSHAN_PATH}/lib/libdarshan.so " + execution)
-            # script.write("\n")
+                if uniqueDir == 1:
+                    script.write("rm t* -r\n")
 
-            numJob += 1
+                script.write("\n")
+
+                # script.write("export RECORDER_TRACES_DIR=$PROFILES\n")
+                # script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution)
+                # script.write("\n")
+                
+                # script.write("export MY_DARSHAN_LOG_DIR=$PROFILES\n")
+                # script.write("export DXT_ENABLE_IO_TRACE=1\n")
+                # script.write("jsrun -E LD_PRELOAD=${DARSHAN_PATH}/lib/libdarshan.so " + execution)
+                # script.write("\n")
+
+                numJob += 1
     print(numJob)
     return numJob
 
 def generateLassenBBIOR(scriptPath='/g/g92/xu23/gpfs1/research/io-experiments/ior/bb/jobs'):
-    previousJobName = ''
     numJob = 0
     df = generateIOROptions()
     df = df[df['system'] == 'lassen-bb'].copy()
-    print(df.shape)
-    df = df.head(100).copy()
-    for index, row in df.iterrows():
-        system = row['system']
-        numBB = row['numBB']
-        if system != 'cori-bb' and numBB != 1:
-            continue
-        if system == 'lassen-gpfs' or system == 'summit-gpfs' or system == 'cori-lustre':
-            numBB = 0
-        api = row['api(-a)']
-        blockSize = row['blockSize(-b)']
-        collective = row['collective(-c)']
-        if api == 'POSIX' and collective == 1:
-            continue
-        fsync = row['fsync(-e)']
-        useExistingTestFile = row['useExistingTestFile(-E)']
-        filePerProc = row['filePerProc(-F)']
-        if (system == 'lassen-bb' or system == 'summit-bb') and filePerProc == 0:
-            continue
-        intraTestBarriers = row['intraTestBarriers(-g)']
-        setAlignment = row['setAlignment(-J)']
-        if api != 'HDF5' and setAlignment != 1:
-            continue
-        keepFile = row['keepFile(-k)']
-        memoryPerNode = row['memoryPerNode(-M)']
-        noFill = row['noFill(-n)']
-        if api != 'HDF5' and noFill == 1:
-            continue
-        preallocate = row['preallocate(-p)']
-        if api != 'MPIIO' and preallocate != 0:
-            continue
-        readFile = row['readFile(-r)']
-        segment = row['segment(-s)']
-        transferSize = row['transferSize(-t)']
-        uniqueDir = row['uniqueDir(-u)']
-        if uniqueDir == 1 and filePerProc != 1:
-            continue
-        useFileView = row['useFileView(-V)']
-        writeFile = row['writeFile(-w)']
-        fsyncPerWrite = row['fsyncPerWrite(-Y)']
-        numProc = row['numProc']
-        numNodes = row['numNodes']
+    df = df[df['numProc'] == 64].copy()
+    # df = df.head(10).copy()
+    for iteration in range(numIteration):
+        for index, row in df.iterrows():
+            system = row['system']
+            numBB = row['numBB']
+            if system != 'cori-bb' and numBB != 1:
+                continue
+            if system == 'lassen-gpfs' or system == 'summit-gpfs' or system == 'cori-lustre':
+                numBB = 0
+            api = row['api(-a)']
+            blockSize = row['blockSize(-b)']
+            collective = row['collective(-c)']
+            if api == 'POSIX' and collective == 1:
+                continue
+            fsync = row['fsync(-e)']
+            if api != 'POSIX' and fsync == 1:
+                continue
+            useExistingTestFile = row['useExistingTestFile(-E)']
+            filePerProc = row['filePerProc(-F)']
+            if (system == 'lassen-bb' or system == 'summit-bb') and filePerProc == 0:
+                continue
+            intraTestBarriers = row['intraTestBarriers(-g)']
+            setAlignment = row['setAlignment(-J)']
+            if api != 'HDF5' and setAlignment != 1:
+                continue
+            keepFile = row['keepFile(-k)']
+            memoryPerNode = row['memoryPerNode(-M)']
+            noFill = row['noFill(-n)']
+            if api != 'HDF5' and noFill == 1:
+                continue
+            preallocate = row['preallocate(-p)']
+            if api != 'MPIIO' and preallocate != 0:
+                continue
+            readFile = row['readFile(-r)']
+            segment = row['segment(-s)']
+            transferSize = row['transferSize(-t)']
+            uniqueDir = row['uniqueDir(-u)']
+            if uniqueDir == 1 and filePerProc != 1:
+                continue
+            useFileView = row['useFileView(-V)']
+            if api != 'MPIIO' and useFileView != 0:
+                continue
+            writeFile = row['writeFile(-w)']
+            fsyncPerWrite = row['fsyncPerWrite(-Y)']
+            if api != 'POSIX' and fsyncPerWrite == 1:
+                continue
+            numProc = row['numProc']
+            numNodes = row['numNodes']
 
-        jobName = str(system) + '.' + str(numBB) + '.' + str(api) + '.' + str(blockSize) + '.' + str(collective) + '.' + str(fsync) \
-            + '.' + str(useExistingTestFile) + '.' + str(filePerProc) + '.' + str(intraTestBarriers) + '.' + str(setAlignment) \
-            + '.' + str(1) + '.' + str(memoryPerNode) + '.' + str(noFill) + '.' + str(preallocate) + '.' + str(readFile) \
-            + '.' + str(segment) + '.' + str(transferSize) + '.' + str(uniqueDir) + '.' + str(useFileView) + '.' + str(writeFile) \
-            + '.' + str(fsyncPerWrite) + '.' + str(numProc)
+            jobName = 'iteration' + str(iteration + 1) + '.' \
+                + str(system) + '.' + str(numBB) + '.' + str(api) + '.' + str(blockSize) + '.' + str(collective) + '.' + str(fsync) \
+                + '.' + str(useExistingTestFile) + '.' + str(filePerProc) + '.' + str(intraTestBarriers) + '.' + str(setAlignment) \
+                + '.' + str(keepFile) + '.' + str(memoryPerNode) + '.' + str(noFill) + '.' + str(preallocate) + '.' + str(readFile) \
+                + '.' + str(segment) + '.' + str(transferSize) + '.' + str(uniqueDir) + '.' + str(useFileView) + '.' + str(writeFile) \
+                + '.' + str(fsyncPerWrite) + '.' + str(numProc)
 
-        filename = scriptPath + '/' + jobName + '.sh'
+            filename = scriptPath + '/' + jobName + '.sh'
 
-        if numProc == 512:
-            if previousJobName != '':
-                generateLassenHeader(filename, numNodes, numNodes * 4, jobName, jobName, '\"ended(\"' + previousJobName + '\")\"')
-            else:
-                generateLassenHeader(filename, numNodes, numNodes * 4, jobName, jobName)
-            previousJobName = jobName
-        else:
-            generateLassenHeader(filename, numNodes, numNodes * 4, jobName, jobName)
-        
-        with open(filename, "a") as script:
-            script.write("export NUM_PROC=" + str(numProc) + "\n")
-            script.write("export NUM_NODES=" + str(numNodes) + "\n")
-            script.write("export FILE_SYSTEM=" + system + "\n")
-            script.write("export NUM_BB_SERVERS=" + str(numBB) + "\n")
-            script.write("\n")
+            blockSizeByte = toByte(blockSize)
+            wtime = 1 + 2 ** math.ceil((math.log(blockSizeByte / 1024, 32)))
+            wtime = math.ceil(wtime * (1 + numNodes / 8))
 
-            script.write("export JOB_HOME=/g/g92/xu23/gpfs1/research/io-experiments/ior/bb\n")
-            script.write("export BIN_PATH=/g/g92/xu23/gpfs1/local/ior-3.3.0/bin\n")
-            script.write("export RECORDER_PATH=/g/g92/xu23/gpfs1/local/recorder-2.2\n")
-            script.write("export DARSHAN_PATH=/g/g92/xu23/gpfs1/local/darshan-3.3.1\n")
-            script.write("export PROFILES=/p/gpfs1/xu23/research/io-experiments/ior/bb/profiles\n")     
-            script.write("\n")     
+            generateLassenHeader(filename, numNodes, wtime, jobName, jobName)
             
-            script.write("export API=" + str(api) + "\n")     
-            script.write("export BLOCK_SIZE=" + str(blockSize) + "\n")     
-            script.write("export SET_ALIGNMENT=" + str(setAlignment) + "\n")
-            script.write("export MEMORY_PER_NODE=" + str(memoryPerNode) + "\n")
-            script.write("export SEGMENT=" + str(segment) + "\n")     
-            script.write("export TRANSFER_SIZE=" + str(transferSize) + "\n")     
-            script.write("\n")
+            with open(filename, "a") as script:
+                script.write("export NUM_PROC=" + str(numProc) + "\n")
+                script.write("export NUM_NODES=" + str(numNodes) + "\n")
+                script.write("export FILE_SYSTEM=" + system + "\n")
+                script.write("export NUM_BB_SERVERS=" + str(numBB) + "\n")
+                script.write("\n")
 
-            script.write("cd $BBPATH\n")
-            script.write("\n")
+                script.write("export JOB_HOME=/g/g92/xu23/gpfs1/research/io-experiments/ior/bb\n")
+                script.write("export BIN_PATH=/g/g92/xu23/gpfs1/local/ior-3.3.0/bin\n")
+                script.write("export RECORDER_PATH=/g/g92/xu23/gpfs1/local/recorder-2.2\n")
+                script.write("export DARSHAN_PATH=/g/g92/xu23/gpfs1/local/darshan-3.3.1\n")
+                script.write("export PROFILES=/p/gpfs1/xu23/research/io-experiments/ior/bb/profiles\n")     
+                script.write("\n")     
+                
+                script.write("export API=" + str(api) + "\n")     
+                script.write("export BLOCK_SIZE=" + str(blockSize) + "\n")     
+                script.write("export SET_ALIGNMENT=" + str(setAlignment) + "\n")
+                script.write("export MEMORY_PER_NODE=" + str(memoryPerNode) + "\n")
+                script.write("export SEGMENT=" + str(segment) + "\n")     
+                script.write("export TRANSFER_SIZE=" + str(transferSize) + "\n")     
+                script.write("\n")
 
-            execution = "-r 32 -n ${NUM_PROC} ${BIN_PATH}/ior -a ${API} -b ${BLOCK_SIZE} -J ${SET_ALIGNMENT} -M ${MEMORY_PER_NODE} -s ${SEGMENT} -t ${TRANSFER_SIZE}"
-            if collective == 1:
-                execution += " -c"
-            if fsync == 1:
-                execution += " -e"
-            if useExistingTestFile == 1:
-                execution += " -E"
-            if filePerProc == 1:
-                execution += " -F"
-            if intraTestBarriers == 1:
-                execution += " -g"
-            if keepFile == 1:
-                execution += " -k"
-            if noFill == 1:
-                execution += " -n"
-            if preallocate == 1:
-                execution += " -p"
-            if readFile == 1:
-                execution += " -r"
-            if uniqueDir == 1:
-                execution += " -u"
-            if useFileView == 1:
-                execution += " -V"
-            if writeFile == 1:
-                execution += " -w"
-            if fsyncPerWrite == 1:
-                execution += " -Y"
-            
-            # execution += " -o $JOB_HOME/app-output-files/" + jobName + ".testFile"
-            execution += " &>> $JOB_HOME/app-stdio/" + jobName + ".txt\n"
+                script.write("jsrun -r 1 -n ${NUM_NODES} mkdir -p $BBPATH/" + jobName + "\n")
+                script.write("jsrun -r 1 -n ${NUM_NODES} cp /g/g92/xu23/gpfs1/research/io-experiments/ior/ior-util.py $BBPATH/" + jobName + "\n")
+                script.write("cd $BBPATH/" + jobName + "\n")
+                script.write("\n")
 
-            script.write("for ITERATION in")
-            for i in range(1, numIteration + 1):
-                script.write(" " + str(i))
-            script.write("\n")
-            script.write("do\n")
-            script.write("    jsrun " + execution)
-            script.write("done\n")
-            script.write("\n")
+                execution = "-r 32 -n ${NUM_PROC} ${BIN_PATH}/ior -a ${API} -b ${BLOCK_SIZE} -J ${SET_ALIGNMENT} -M ${MEMORY_PER_NODE} -s ${SEGMENT} -t ${TRANSFER_SIZE}"
+                
+                if collective == 1:
+                    execution += " -c"
+                if fsync == 1:
+                    execution += " -e"
+                if filePerProc == 1:
+                    execution += " -F"
+                if intraTestBarriers == 1:
+                    execution += " -g"
+                if noFill == 1:
+                    execution += " -n"
+                if preallocate == 1:
+                    execution += " -p"
+                if uniqueDir == 1:
+                    execution += " -u"
+                if useFileView == 1:
+                    execution += " -V"
+                if fsyncPerWrite == 1:
+                    execution += " -Y"
 
-            # script.write("export RECORDER_TRACES_DIR=$PROFILES\n")
-            # script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution)
-            # script.write("\n")
-            
-            # script.write("export MY_DARSHAN_LOG_DIR=$PROFILES\n")
-            # script.write("export DXT_ENABLE_IO_TRACE=1\n")
-            # script.write("jsrun -E LD_PRELOAD=${DARSHAN_PATH}/lib/libdarshan.so " + execution)
-            # script.write("\n")
-            numJob += 1
+                redirect = " &>> $JOB_HOME/app-stdio/" + jobName + ".txt\n"
+                    
+                script.write("printf \"start\\n\" > $JOB_HOME/app-stdio/" + jobName + ".txt\n")
+
+                script.write("printf \"\\nwrite scratch\\n\"" + redirect)
+                execution1 = execution + " -w -k -o testFile" + redirect
+                script.write("jsrun " + execution1)
+
+                script.write("printf \"\\nWAW\\n\"" + redirect)
+                execution2 = execution + " -w -E -k -o testFile" + redirect
+                script.write("jsrun " + execution2)
+
+                script.write("printf \"\\nRAW\\n\"" + redirect)
+                execution3 = execution + " -r -k -o testFile" + redirect
+                script.write("jsrun " + execution3)
+                
+                script.write("jsrun -r 1 -n ${NUM_NODES} python3 ior-util.py rename renamed " + str(uniqueDir) + "\n")
+
+                script.write("printf \"\\nread renamed\\n\"" + redirect)
+                execution4 = ''
+                if uniqueDir == 1:
+                    execution4 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution4 = execution + " -r -k -o renamed-testFile"
+                execution4 += redirect
+                script.write("jsrun " + execution4)
+
+                script.write("printf \"\\nRAR\\n\"" + redirect)
+                execution5 = ''
+                if uniqueDir == 1:
+                    execution5 = execution + " -r -k -o trenamed-estFile"
+                else:
+                    execution5 = execution + " -r -k -o renamed-testFile"
+                execution5 += redirect
+                script.write("jsrun " + execution5)
+
+                script.write("printf \"\\nWAR\\n\"" + redirect)
+                execution6 = ''
+                if uniqueDir == 1:
+                    execution6 = execution + " -w -E -o trenamed-estFile"
+                else:
+                    execution6 = execution + " -w -E -o renamed-testFile"
+                execution6 += redirect
+                script.write("jsrun " + execution6)
+
+                # if uniqueDir == 1:
+                #     script.write("rm t* -r\n")
+
+                script.write("jsrun -r 32 -n ${NUM_PROC} python3 ./ior-util.py prepareFileBB " + str(uniqueDir) + " touchedTestFile" + "\n")
+
+                script.write("printf \"\\nwrite touched file\\n\"" + redirect)
+                execution7 = execution + " -w -E -o touchedTestFile" + redirect
+                script.write("jsrun " + execution7)
+
+                # if uniqueDir == 1:
+                #     script.write("rm t* -r\n")
+
+                script.write("\n")
+
+                # script.write("export RECORDER_TRACES_DIR=$PROFILES\n")
+                # script.write("jsrun -E LD_PRELOAD=${RECORDER_PATH}/lib/librecorder.so " + execution)
+                # script.write("\n")
+                
+                # script.write("export MY_DARSHAN_LOG_DIR=$PROFILES\n")
+                # script.write("export DXT_ENABLE_IO_TRACE=1\n")
+                # script.write("jsrun -E LD_PRELOAD=${DARSHAN_PATH}/lib/libdarshan.so " + execution)
+                # script.write("\n")
+
+                numJob += 1
     print(numJob)
     return numJob
 
@@ -371,7 +1103,7 @@ def generateIOROptions():
     segment = DataFrame({'segment(-s)': [1], 'key': [0]})
     transferSize = DataFrame({'transferSize(-t)': ['1k', '32k', '1m', '32m', '1g'], 'blockSize(-b)': ['1k', '32k', '1m', '32m', '1g'], 'key': [0] * 5})
     uniqueDir = DataFrame({'uniqueDir(-u)': [0, 1], 'key': [0] * 2})
-    useFileView = DataFrame({'useFileView(-V)': [0], 'key': [0]})
+    useFileView = DataFrame({'useFileView(-V)': [0, 1], 'key': [0] * 2})
     writeFile = DataFrame({'writeFile(-w)': [1], 'key': [0]})
     fsyncPerWrite = DataFrame({'fsyncPerWrite(-Y)': [0, 1], 'key': [0] * 2})
     numProc = DataFrame({'numProc': [64, 128, 256, 512], 'numNodes': [2, 4, 8, 16], 'key': [0] * 4})
@@ -399,6 +1131,8 @@ def generateIOROptions():
     return df
 
 def toByte(size):
+    if type(size) == int:
+        return size
     unit = size[-1]
     if unit == 'k':
         return int(size[:-1]) * 1024
@@ -411,6 +1145,17 @@ def toByte(size):
 
 if __name__ == '__main__':
     pass
-    generateLassenGpfsIOR()
-    # generateLassenBBIOR()
+    system = sys.argv[1]
+    if system == 'gpfs':
+        generateLassenGpfsIOR()
+    elif system == 'bb':
+        generateLassenBBIOR()
+    elif system == 'gpfs-extreme':
+        generateLassenGpfsExtremePoints()
+    elif system == 'bb-extreme':
+        generateLassenBBExtremePoints()
+    elif system == 'gpfs-extreme-no-recorder':
+        generateLassenGpfsExtremePointsNoRecorder()
+    elif system == 'bb-extreme-no-recorder':
+        generateLassenBBExtremePointsNoRecorder()
     

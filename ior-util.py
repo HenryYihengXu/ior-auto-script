@@ -10,12 +10,12 @@ def rename(name, uniqueDir):
         dirnames = glob.glob("./*")
         for dirname in dirnames:
             dirname = dirname.split('/')[-1]
-            if dirname == 'ior-util.py':
+            if dirname == 'ior-util.py' or dirname == 'recorder-logs':
                 continue
             filenames = glob.glob('./' + dirname + '/*')
             for filename in filenames:
                 filename = filename.split('/')[-1]
-                if filename == 'ior-util.py':
+                if filename == 'ior-util.py' or filename == 'recorder-logs':
                     continue
                 subprocess.run('mv ./' + dirname + '/' + filename + ' ./' + dirname + '/' + name + '-' + filename.split('-')[-1], shell=True)
             
@@ -25,7 +25,7 @@ def rename(name, uniqueDir):
         for filename in filenames:
             print(filename)
             filename = filename.split('/')[-1]
-            if filename == 'ior-util.py':
+            if filename == 'ior-util.py' or filename == 'recorder-logs':
                 continue
             subprocess.run('mv ./' + filename + ' ' + './' + name + '-' + filename.split('-')[-1], shell=True)
 
@@ -58,16 +58,17 @@ def prepareFileGpfs(uniqueDir, filePerProcess, numProc, name):
 def prepareFileBB(uniqueDir, name):
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
+    subprocess.run('rm t' + str(rank) + ' -r', shell=True)
     if uniqueDir == 1:
         subprocess.run('mkdir t' + str(rank), shell=True)
         if rank < 10:
-            subprocess.run('touch ' + name[0] + '/' + name[1:] + '.0000000' + str(rank), shell=True)
+            subprocess.run('touch ' + name[0] + str(rank) + '/' + name[1:] + '.0000000' + str(rank), shell=True)
         elif rank >= 10 and rank < 100:
-            subprocess.run('touch ' + name[0] + '/' + name[1:] + '.000000' + str(rank), shell=True)
+            subprocess.run('touch ' + name[0] + str(rank) + '/' + name[1:] + '.000000' + str(rank), shell=True)
         elif rank >= 100 and rank < 1000:
-            subprocess.run('touch ' + name[0] + '/' + name[1:] + '.00000' + str(rank), shell=True)
+            subprocess.run('touch ' + name[0] + str(rank) + '/' + name[1:] + '.00000' + str(rank), shell=True)
         else:
-            subprocess.run('touch ' + name[0] + '/' + name[1:] + '.0000' + str(rank), shell=True)
+            subprocess.run('touch ' + name[0] + str(rank) + '/' + name[1:] + '.0000' + str(rank), shell=True)
     else:
         if rank < 10:
             subprocess.run('touch ' + name + '.0000000' + str(rank), shell=True)
